@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cờ Úp — Cờ Tướng Kiểu Úp</title>
-    <meta name="description" content="Game Cờ Úp online - Cờ tướng kiểu úp với hiệu ứng đẹp mắt, âm thanh sống động, chế độ chơi với máy 3 cấp độ">
+    <meta name="description" content="Game Cờ Úp online - Chơi 2 người trên 2 thiết bị khác nhau qua tạo phòng, chơi với máy AI 3 cấp độ">
     <meta name="theme-color" content="#140f0b">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♚</text></svg>">
     <link rel="stylesheet" href="css/style.css">
@@ -30,7 +30,8 @@
     <div class="game-config-bar">
         <div class="mode-select-group">
             <button id="mode-pve" class="mode-btn active" data-mode="pve">🤖 Chơi với Máy</button>
-            <button id="mode-pvp" class="mode-btn" data-mode="pvp">👥 2 Người chơi</button>
+            <button id="mode-pvp" class="mode-btn" data-mode="pvp">👥 Cùng máy</button>
+            <button id="mode-online" class="mode-btn" data-mode="online">🌐 Đấu Online</button>
         </div>
 
         <div id="ai-difficulty-group" class="difficulty-select-group">
@@ -38,6 +39,12 @@
             <button class="diff-btn" data-diff="easy">🟢 Dễ</button>
             <button class="diff-btn active" data-diff="medium">🟡 Vừa</button>
             <button class="diff-btn" data-diff="hard">🔴 Khó</button>
+        </div>
+
+        <div id="online-room-badge" class="online-room-badge" style="display: none;">
+            <span class="room-indicator">🟢 Phòng: <strong id="current-room-code">—</strong></span>
+            <button id="btn-room-info" class="btn-sm" title="Chi tiết phòng">🔗 Chia sẻ</button>
+            <button id="btn-leave-room" class="btn-sm btn-danger" title="Rời phòng">✕</button>
         </div>
     </div>
 
@@ -52,7 +59,7 @@
         <!-- ─── Player 1 Panel ─── -->
         <aside class="player-panel panel-left">
             <div id="player1-card" class="player-card active">
-                <div class="player-name">👤 Người chơi 1</div>
+                <div id="player1-title" class="player-name">👤 Người chơi 1</div>
                 <div id="p1-color" class="player-color">❓ Chưa xác định</div>
                 <div class="player-timer">⏱ <span id="timer-p1">00:00</span></div>
             </div>
@@ -85,7 +92,7 @@
             </div>
         </div>
 
-        <!-- ─── Player 2 / AI Panel ─── -->
+        <!-- ─── Player 2 / AI / Online Opponent Panel ─── -->
         <aside class="player-panel panel-right">
             <div id="player2-card" class="player-card">
                 <div id="player2-title" class="player-name">🤖 Máy (Vừa)</div>
@@ -107,6 +114,66 @@
 <!-- ===============================================
      MODALS
      =============================================== -->
+
+<!-- ─── Online Room Modal (Tạo phòng / Vào phòng) ─── -->
+<div id="modal-online-room" class="modal-overlay">
+    <div class="modal modal-online">
+        <button class="modal-close">✕</button>
+        <h2>🌐 Đấu Cờ Úp Online 2 Thiết Bị</h2>
+        
+        <div class="online-tabs">
+            <button id="tab-create-room" class="tab-btn active">➕ Tạo phòng mới</button>
+            <button id="tab-join-room" class="tab-btn">🚪 Vào phòng có sẵn</button>
+        </div>
+
+        <!-- Tab 1: Tạo phòng -->
+        <div id="panel-create-room" class="tab-panel active">
+            <p class="panel-desc">Tạo phòng để lấy mã và link gửi cho bạn bè cùng chơi:</p>
+            
+            <div id="host-loading-box" class="host-status-box" style="display: none;">
+                <div class="spinner"></div>
+                <p>Đang tạo phòng trên hệ thống...</p>
+            </div>
+
+            <div id="host-ready-box" class="host-status-box" style="display: none;">
+                <div class="room-code-display">
+                    <span class="code-label">MÃ PHÒNG:</span>
+                    <strong id="display-room-code" class="code-text">8888</strong>
+                    <button id="btn-copy-code" class="btn-copy">📋 Sao chép mã</button>
+                </div>
+
+                <div class="share-link-box">
+                    <label>Link gửi bạn bè:</label>
+                    <div class="input-with-btn">
+                        <input id="display-share-link" type="text" readonly value="">
+                        <button id="btn-copy-link" class="btn-primary-sm">🔗 Sao chép link</button>
+                    </div>
+                </div>
+
+                <div class="waiting-peer-notice">
+                    <span class="pulsing-dot"></span>
+                    <span>Đang đợi đối thủ vào phòng... Hãy gửi mã hoặc link cho bạn bè!</span>
+                </div>
+            </div>
+
+            <div id="host-init-box">
+                <button id="btn-start-create-room" class="btn btn-primary btn-block">🚀 Bắt đầu Tạo phòng</button>
+            </div>
+        </div>
+
+        <!-- Tab 2: Vào phòng -->
+        <div id="panel-join-room" class="tab-panel">
+            <p class="panel-desc">Nhập mã phòng 4 chữ số do đối thủ gửi cho bạn:</p>
+            
+            <div class="join-input-group">
+                <input id="input-join-code" type="text" maxlength="6" placeholder="Ví dụ: 8888" autofocus>
+                <button id="btn-start-join-room" class="btn btn-primary">Tham Gia Ngay</button>
+            </div>
+
+            <div id="join-status-msg" class="join-status-msg" style="display: none;"></div>
+        </div>
+    </div>
+</div>
 
 <!-- ─── Help Modal ─── -->
 <div id="modal-help" class="modal-overlay">
@@ -143,12 +210,8 @@
                 <li>👑 <strong>Luật Lộ mặt tướng:</strong> Hai Tướng không được nhìn mặt nhau trên cùng một cột trống.</li>
             </ul>
 
-            <h3>🤖 Chế độ chơi với Máy</h3>
-            <ul>
-                <li>🟢 <strong>Dễ:</strong> Đi cờ ngẫu nhiên, giải trí nhẹ nhàng.</li>
-                <li>🟡 <strong>Vừa:</strong> Đánh giá thiệt hơn, ăn quân có lợi và tránh vị trí nguy hiểm.</li>
-                <li>🔴 <strong>Khó:</strong> Thuật toán Minimax + Alpha-Beta, tính toán bảo vệ Tướng và mở quân chiến thuật.</li>
-            </ul>
+            <h3>🌐 Chơi 2 người trên 2 thiết bị khác nhau</h3>
+            <p>Bấm chọn tab <strong>"🌐 Đấu Online"</strong> -> bấm <strong>"Tạo phòng mới"</strong> -> gửi mã hoặc link cho đối phương để kết nối trực tiếp!</p>
         </div>
     </div>
 </div>
@@ -195,8 +258,12 @@
 <!-- ===============================================
      SCRIPTS (load order matters)
      =============================================== -->
+<!-- PeerJS for WebRTC P2P Room Connection -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
 <script src="js/pieces.js"></script>
 <script src="js/ai.js"></script>
+<script src="js/multiplayer.js"></script>
 <script src="js/sound.js"></script>
 <script src="js/effects.js"></script>
 <script src="js/storage.js"></script>

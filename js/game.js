@@ -1,26 +1,23 @@
 /**
- * Cờ Úp - Main Game Controller
+ * Cờ Úp - Main Game Controller with Online Multiplayer Support
  * 
- * Implements authentic Vietnamese Cờ Úp (Cờ Tướng Úp) rules:
- * - 16 Red pieces (Red King face-up at 9,4; 15 pieces face-down on Red starting spots)
- * - 16 Black pieces (Black King face-up at 0,4; 15 pieces face-down on Black starting spots)
- * - Face-down pieces move according to the spot's Xiangqi rules and flip face-up upon landing
- * - Face-up Sĩ can move across the whole board (diagonally 1 step)
- * - Face-up Tượng can cross the river (diagonally 2 steps with blocked-eye rule)
- * - Flying general rule (hai Tướng không được nhìn mặt nhau trên cùng cột trống)
- * - Check & Checkmate detection with AI integration (Easy, Medium, Hard)
+ * Manages game state, handles user input, enforces rules,
+ * integrates AI opponent with 3 difficulty levels,
+ * supports Real-time 2-Device Online Multiplayer via WebRTC P2P (PeerJS),
+ * coordinates Board/Sound/Effects/Storage modules on the 9×10 Xiangqi board.
  */
 window.CoUp = window.CoUp || {};
 
 window.CoUp.Game = (function () {
     'use strict';
 
-    var Pieces  = window.CoUp.Pieces;
-    var Board   = window.CoUp.Board;
-    var AI      = window.CoUp.AI;
-    var Sound   = window.CoUp.Sound;
-    var Effects = window.CoUp.Effects;
-    var Storage = window.CoUp.Storage;
+    var Pieces      = window.CoUp.Pieces;
+    var Board       = window.CoUp.Board;
+    var AI          = window.CoUp.AI;
+    var Multiplayer = window.CoUp.Multiplayer;
+    var Sound       = window.CoUp.Sound;
+    var Effects     = window.CoUp.Effects;
+    var Storage     = window.CoUp.Storage;
 
     var ROWS = 10, COLS = 9;
 
@@ -38,7 +35,7 @@ window.CoUp.Game = (function () {
 
         return {
             board: board,
-            currentPlayer: 1, // 1 = Red (Bottom), 2 = Black (Top / AI)
+            currentPlayer: 1, // 1 = Red (Bottom), 2 = Black (Top)
             player1Color: 'red',
             player2Color: 'black',
             selectedCell: null,
@@ -49,10 +46,11 @@ window.CoUp.Game = (function () {
             moveCount: 0,
             timer: { player1: 0, player2: 0 },
             lastMoveTime: Date.now(),
-            gameMode: gameMode || settings.gameMode || 'pve',           // 'pve' | 'pvp'
+            gameMode: gameMode || settings.gameMode || 'pve',           // 'pve' | 'pvp' | 'online'
             aiDifficulty: aiDifficulty || settings.aiDifficulty || 'medium', // 'easy' | 'medium' | 'hard'
             isAiThinking: false,
-            inCheck: null // 'red' | 'black' | null
+            inCheck: null, // 'red' | 'black' | null
+            myOnlineColor: 'red' // In online mode: 'red' (Host) | 'black' (Guest)
         };
     }
 
@@ -85,8 +83,10 @@ window.CoUp.Game = (function () {
             return;
         }
 
-        // Trigger AI turn if applicable
-        triggerAiTurnIfNeeded();
+        // Trigger AI turn if in PvE mode
+        if (state.gameMode === 'pve') {
+            triggerAiTurnIfNeeded();
+        }
     }
 
     function isCurrentPlayerPiece(piece) {
@@ -123,7 +123,7 @@ window.CoUp.Game = (function () {
                 return;
             }
 
-            executeMove(aiMove.fromRow, aiMove.fromCol, aiMove.toRow, aiMove.toCol, aiMove.type);
+            executeMove(aiMove.fromRow, aiMove.fromCol, aiMove.toRow, aiMove.toCol, aiMove.type, false);
         }, thinkDelay);
     }
 
@@ -131,19 +131,14 @@ window.CoUp.Game = (function () {
     //  AUTHENTIC CỜ ÚP MOVE VALIDATION
     // =============================================
 
-    /**
-     * Get all legal moves for a piece at (row, col)
-     * Filters out moves that leave own King in check or violate Flying General rule
-     */
     function getValidMoves(row, col) {
         var piece = state.board[row][col];
         if (!piece) return [];
         if (piece.color !== getCurrentPlayerColor()) return [];
 
         var rawMoves = getRawPieceMoves(state.board, row, col);
-
-        // Filter moves to ensure Flying General rule and King safety
         var legalMoves = [];
+
         for (var i = 0; i < rawMoves.length; i++) {
             var m = rawMoves[i];
             var simBoard = simulateMove(state.board, row, col, m.row, m.col);
@@ -160,69 +155,39 @@ window.CoUp.Game = (function () {
         return legalMoves;
     }
 
-    /**
-     * Calculate pseudo-legal moves for a piece (or face-down spot)
-     */
     function getRawPieceMoves(board, row, col) {
         var piece = board[row][col];
         if (!piece) return [];
 
-        // If face-down: moves according to the original starting spot rule
         if (!piece.faceUp) {
             return getSpotRuleMoves(board, row, col, piece.originalSpotType, piece.color);
         }
 
-        // If face-up: moves according to true Xiangqi piece rules with Co Up exceptions
         return getFaceUpPieceMoves(board, row, col, piece.type, piece.color);
     }
 
-    /**
-     * Movement rule for a Face-Down piece based on its starting spot
-     */
     function getSpotRuleMoves(board, row, col, spotType, color) {
         switch (spotType) {
-            case Pieces.Types.CHARIOT:
-                return getChariotMoves(board, row, col, color);
-            case Pieces.Types.HORSE:
-                return getHorseMoves(board, row, col, color);
-            case Pieces.Types.ELEPHANT:
-                // Elephant spot rule
-                return getElephantMoves(board, row, col, color, true);
-            case Pieces.Types.ADVISOR:
-                // Advisor spot rule: diagonal 1 step
-                return getAdvisorSpotMoves(board, row, col, color);
-            case Pieces.Types.CANNON:
-                return getCannonMoves(board, row, col, color);
-            case Pieces.Types.SOLDIER:
-                return getSoldierMoves(board, row, col, color);
-            default:
-                return [];
+            case Pieces.Types.CHARIOT:  return getChariotMoves(board, row, col, color);
+            case Pieces.Types.HORSE:    return getHorseMoves(board, row, col, color);
+            case Pieces.Types.ELEPHANT: return getElephantMoves(board, row, col, color);
+            case Pieces.Types.ADVISOR:  return getAdvisorSpotMoves(board, row, col, color);
+            case Pieces.Types.CANNON:   return getCannonMoves(board, row, col, color);
+            case Pieces.Types.SOLDIER:  return getSoldierMoves(board, row, col, color);
+            default: return [];
         }
     }
 
-    /**
-     * Movement rule for a Face-Up piece based on its true identity
-     */
     function getFaceUpPieceMoves(board, row, col, pieceType, color) {
         switch (pieceType) {
-            case Pieces.Types.GENERAL:
-                return getGeneralMoves(board, row, col, color);
-            case Pieces.Types.ADVISOR:
-                // Special Cờ Úp rule: Sĩ can move diagonally anywhere on the board!
-                return getAdvisorFullBoardMoves(board, row, col, color);
-            case Pieces.Types.ELEPHANT:
-                // Special Cờ Úp rule: Tượng can cross the river!
-                return getElephantMoves(board, row, col, color, true);
-            case Pieces.Types.CHARIOT:
-                return getChariotMoves(board, row, col, color);
-            case Pieces.Types.CANNON:
-                return getCannonMoves(board, row, col, color);
-            case Pieces.Types.HORSE:
-                return getHorseMoves(board, row, col, color);
-            case Pieces.Types.SOLDIER:
-                return getSoldierMoves(board, row, col, color);
-            default:
-                return [];
+            case Pieces.Types.GENERAL:  return getGeneralMoves(board, row, col, color);
+            case Pieces.Types.ADVISOR:  return getAdvisorSpotMoves(board, row, col, color); // Full board Sĩ
+            case Pieces.Types.ELEPHANT: return getElephantMoves(board, row, col, color);    // River crossing Tượng
+            case Pieces.Types.CHARIOT:  return getChariotMoves(board, row, col, color);
+            case Pieces.Types.CANNON:   return getCannonMoves(board, row, col, color);
+            case Pieces.Types.HORSE:    return getHorseMoves(board, row, col, color);
+            case Pieces.Types.SOLDIER:  return getSoldierMoves(board, row, col, color);
+            default: return [];
         }
     }
 
@@ -262,7 +227,7 @@ window.CoUp.Game = (function () {
                     if (!target) {
                         moves.push({ row: r, col: c, type: 'move' });
                     } else {
-                        jumped = true; // Screen piece
+                        jumped = true;
                     }
                 } else {
                     if (target) {
@@ -279,10 +244,9 @@ window.CoUp.Game = (function () {
         return moves;
     }
 
-    // ─── 3. MÃ (HORSE) with Leg Blocking (Cản mã) ───
+    // ─── 3. MÃ (HORSE) ───
     function getHorseMoves(board, row, col, color) {
         var moves = [];
-        // [dr, dc, leg_dr, leg_dc]
         var jumps = [
             [-2, -1, -1, 0], [-2, 1, -1, 0], // Up
             [2, -1, 1, 0],   [2, 1, 1, 0],   // Down
@@ -292,9 +256,7 @@ window.CoUp.Game = (function () {
         jumps.forEach(function (j) {
             var nr = row + j[0], nc = col + j[1];
             var lr = row + j[2], lc = col + j[3];
-
             if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
-                // Check if horse leg is free
                 if (!board[lr][lc]) {
                     var target = board[nr][nc];
                     if (!target) {
@@ -308,8 +270,8 @@ window.CoUp.Game = (function () {
         return moves;
     }
 
-    // ─── 4. TƯỢNG (ELEPHANT) with Eye Blocking & River Crossing in Cờ Úp ───
-    function getElephantMoves(board, row, col, color, canCrossRiver) {
+    // ─── 4. TƯỢNG (ELEPHANT) ───
+    function getElephantMoves(board, row, col, color) {
         var moves = [];
         var steps = [
             [-2, -2, -1, -1], [-2, 2, -1, 1],
@@ -317,10 +279,8 @@ window.CoUp.Game = (function () {
         ];
         steps.forEach(function (s) {
             var nr = row + s[0], nc = col + s[1];
-            var er = row + s[2], ec = col + s[3]; // Eye
-
+            var er = row + s[2], ec = col + s[3];
             if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
-                // Check if elephant eye is free
                 if (!board[er][ec]) {
                     var target = board[nr][nc];
                     if (!target) {
@@ -335,7 +295,6 @@ window.CoUp.Game = (function () {
     }
 
     // ─── 5. SĨ (ADVISOR) ───
-    // Spot rule when face-down (diagonal 1 step from starting spot)
     function getAdvisorSpotMoves(board, row, col, color) {
         var moves = [];
         var diagonals = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
@@ -351,11 +310,6 @@ window.CoUp.Game = (function () {
             }
         });
         return moves;
-    }
-
-    // Full board diagonal 1 step for uncovered Sĩ in Cờ Úp
-    function getAdvisorFullBoardMoves(board, row, col, color) {
-        return getAdvisorSpotMoves(board, row, col, color);
     }
 
     // ─── 6. TƯỚNG (GENERAL / KING) in Palace ───
@@ -386,7 +340,7 @@ window.CoUp.Game = (function () {
         var forwardDir = color === 'red' ? -1 : 1;
         var hasCrossedRiver = color === 'red' ? (row <= 4) : (row >= 5);
 
-        // 1. Always move forward
+        // Forward
         var fr = row + forwardDir, fc = col;
         if (fr >= 0 && fr < ROWS) {
             var tFwd = board[fr][fc];
@@ -397,7 +351,7 @@ window.CoUp.Game = (function () {
             }
         }
 
-        // 2. Can move sideways left & right after crossing river
+        // Sideways after river
         if (hasCrossedRiver) {
             [-1, 1].forEach(function (dc) {
                 var sc = col + dc;
@@ -419,9 +373,6 @@ window.CoUp.Game = (function () {
     //  CHECK & FLYING GENERAL RULES
     // =============================================
 
-    /**
-     * Check if 2 Kings face each other on the same vertical line without pieces between
-     */
     function isFlyingGeneral(board) {
         var redKing = null, blackKing = null;
         for (var r = 0; r < ROWS; r++) {
@@ -437,21 +388,17 @@ window.CoUp.Game = (function () {
         if (!redKing || !blackKing) return false;
         if (redKing.c !== blackKing.c) return false;
 
-        // Same column: check if all intersections between them are empty
         var col = redKing.c;
         var startR = Math.min(redKing.r, blackKing.r) + 1;
         var endR = Math.max(redKing.r, blackKing.r);
 
         for (var r2 = startR; r2 < endR; r2++) {
-            if (board[r2][col]) return false; // Blocked by a piece
+            if (board[r2][col]) return false;
         }
 
-        return true; // Flying general violation!
+        return true;
     }
 
-    /**
-     * Check if the King of `kingColor` is currently under attack
-     */
     function isKingInCheck(board, kingColor) {
         var kingPos = null;
         for (var r = 0; r < ROWS; r++) {
@@ -465,11 +412,10 @@ window.CoUp.Game = (function () {
             if (kingPos) break;
         }
 
-        if (!kingPos) return true; // King captured / missing
+        if (!kingPos) return true;
 
         var attackerColor = getOpponentColor(kingColor);
 
-        // Check all enemy pieces to see if any can reach kingPos
         for (var r2 = 0; r2 < ROWS; r2++) {
             for (var c2 = 0; c2 < COLS; c2++) {
                 var attacker = board[r2][c2];
@@ -487,9 +433,6 @@ window.CoUp.Game = (function () {
         return false;
     }
 
-    /**
-     * Check if player of `color` has ANY legal moves left
-     */
     function hasAnyLegalMoves(board, color) {
         for (var r = 0; r < ROWS; r++) {
             for (var c = 0; c < COLS; c++) {
@@ -520,7 +463,7 @@ window.CoUp.Game = (function () {
         }
         var moving = newB[fromR][fromC];
         if (moving) {
-            moving.faceUp = true; // Flips upon moving
+            moving.faceUp = true;
             newB[toR][toC] = moving;
             newB[fromR][fromC] = null;
         }
@@ -536,6 +479,11 @@ window.CoUp.Game = (function () {
 
         // In PvE mode, human cannot control AI (Player 2)
         if (state.gameMode === 'pve' && state.currentPlayer === 2) return;
+
+        // In Online mode, player can only control their assigned color
+        if (state.gameMode === 'online') {
+            if (getCurrentPlayerColor() !== state.myOnlineColor) return;
+        }
 
         var cell = state.board[row][col];
 
@@ -562,7 +510,7 @@ window.CoUp.Game = (function () {
             }
 
             if (move) {
-                executeMove(sr, sc, row, col, move.type);
+                executeMove(sr, sc, row, col, move.type, true);
                 return;
             }
 
@@ -581,9 +529,8 @@ window.CoUp.Game = (function () {
         }
 
         // --- No piece currently selected ---
-        if (!cell) return; // Empty intersection
+        if (!cell) return;
 
-        // Select own piece (face-up or face-down)
         if (isCurrentPlayerPiece(cell)) {
             state.selectedCell = { row: row, col: col };
             Sound.playSelect();
@@ -596,10 +543,19 @@ window.CoUp.Game = (function () {
     //  EXECUTE MOVE / CAPTURE / FLIP
     // =============================================
 
-    function executeMove(fromRow, fromCol, toRow, toCol, moveType) {
+    function executeMove(fromRow, fromCol, toRow, toCol, moveType, broadcast) {
         var piece = state.board[fromRow][fromCol];
         var target = state.board[toRow][toCol];
         var wasFaceDown = !piece.faceUp;
+
+        // Broadcast to peer if in Online mode and this is a local move
+        if (state.gameMode === 'online' && broadcast && Multiplayer.isConnected()) {
+            Multiplayer.send('move', {
+                fromRow: fromRow, fromCol: fromCol,
+                toRow: toRow, toCol: toCol,
+                moveType: moveType
+            });
+        }
 
         // Save undo info
         state.moveHistory.push({
@@ -631,7 +587,7 @@ window.CoUp.Game = (function () {
                 if (boardContainer) Effects.screenShake(boardContainer, 4, 200);
             }
 
-            // Check if captured King -> instant victory
+            // Capture King -> instant victory
             if (target.type === Pieces.Types.GENERAL && target.faceUp) {
                 endGame(piece.color);
                 state.board[toRow][toCol] = piece;
@@ -703,11 +659,13 @@ window.CoUp.Game = (function () {
         var winnerName = '';
         if (state.gameMode === 'pve') {
             winnerName = winner === 'red' ? '👤 Bạn (Bên Đỏ)' : '🤖 Máy tính (Bên Đen)';
+        } else if (state.gameMode === 'online') {
+            winnerName = winner === state.myOnlineColor ? '🎉 BẠN ĐÃ CHIẾN THẮNG!' : '😢 ĐỐI THỦ ĐÃ THẮNG';
         } else {
             winnerName = winner === 'red' ? 'Người chơi 1 (Đỏ)' : 'Người chơi 2 (Đen)';
         }
 
-        if (text) text.innerHTML = '🎉 ' + winnerName + ' (<span class="' + winner + '-text">' + colorName + '</span>) chiến thắng! 🎉';
+        if (text) text.innerHTML = winnerName + ' (<span class="' + winner + '-text">' + colorName + '</span>)';
         if (modal) modal.classList.add('active');
     }
 
@@ -716,7 +674,7 @@ window.CoUp.Game = (function () {
     // =============================================
 
     function undo() {
-        if (state.moveHistory.length === 0 || state.isAiThinking) return;
+        if (state.moveHistory.length === 0 || state.isAiThinking || state.gameMode === 'online') return;
 
         if (state.gamePhase === 'ended') {
             state.gamePhase = 'playing';
@@ -725,7 +683,6 @@ window.CoUp.Game = (function () {
             if (winModal) winModal.classList.remove('active');
         }
 
-        // In PvE mode, undoing 1 turn when it's player 1's turn should revert BOTH AI move and Player move
         var stepsToUndo = (state.gameMode === 'pve' && state.moveHistory.length >= 2 && state.currentPlayer === 1) ? 2 : 1;
 
         for (var s = 0; s < stepsToUndo; s++) {
@@ -734,7 +691,7 @@ window.CoUp.Game = (function () {
 
             var piece = state.board[last.toRow][last.toCol];
             if (piece) {
-                piece.faceUp = !last.wasFaceDown; // Restore face-down state
+                piece.faceUp = !last.wasFaceDown;
                 state.board[last.fromRow][last.fromCol] = piece;
             }
 
@@ -766,12 +723,18 @@ window.CoUp.Game = (function () {
     }
 
     // =============================================
-    //  NEW GAME & CONTROLS
+    //  NEW GAME & ONLINE SYNC
     // =============================================
 
     function newGame() {
         if (timerInterval) clearInterval(timerInterval);
         state = createNewState(state ? state.gameMode : null, state ? state.aiDifficulty : null);
+        
+        // If Host in online mode: broadcast new board to Guest
+        if (state.gameMode === 'online' && Multiplayer.isHost() && Multiplayer.isConnected()) {
+            Multiplayer.send('sync_board', { board: state.board });
+        }
+
         startTimer();
         Sound.playGameStart();
         autoSave();
@@ -841,12 +804,15 @@ window.CoUp.Game = (function () {
 
         if (state.gameMode === 'pve') {
             pLabel = state.currentPlayer === 1 ? '👤 Bạn (Đỏ)' : '🤖 Máy tính (Đen)';
+        } else if (state.gameMode === 'online') {
+            var isMyTurn = (color === state.myOnlineColor);
+            pLabel = isMyTurn ? '👉 Lượt của BẠN' : '⏳ Lượt của ĐỐI THỦ';
         } else {
             pLabel = 'Người chơi ' + state.currentPlayer + ' (' + (color === 'red' ? 'Đỏ' : 'Đen') + ')';
         }
 
         var checkNotice = state.inCheck ? ' ⚡ ĐANG BỊ CHIẾU!' : '';
-        el.textContent = '🎯 Lượt: ' + pLabel + checkNotice;
+        el.textContent = '🎯 ' + pLabel + ' [' + colorName + ']' + checkNotice;
         el.className = 'turn-info ' + color + (state.inCheck ? ' check-alert' : '');
     }
 
@@ -855,12 +821,23 @@ window.CoUp.Game = (function () {
         var p2ColorEl = document.getElementById('p2-color');
         var p1Card = document.getElementById('player1-card');
         var p2Card = document.getElementById('player2-card');
+        var p1Title = document.getElementById('player1-title');
         var p2Title = document.getElementById('player2-title');
+
+        if (p1Title) {
+            if (state.gameMode === 'online') {
+                p1Title.innerHTML = state.myOnlineColor === 'red' ? '👤 Bạn (Chủ phòng)' : '👤 Chủ phòng (Đỏ)';
+            } else {
+                p1Title.innerHTML = '👤 Người chơi 1';
+            }
+        }
 
         if (p2Title) {
             if (state.gameMode === 'pve') {
                 var diffNames = { easy: 'Dễ', medium: 'Vừa', hard: 'Khó' };
                 p2Title.innerHTML = '🤖 Máy (' + (diffNames[state.aiDifficulty] || 'Vừa') + ')';
+            } else if (state.gameMode === 'online') {
+                p2Title.innerHTML = state.myOnlineColor === 'black' ? '👤 Bạn (Khách)' : '👤 Đối thủ Online';
             } else {
                 p2Title.innerHTML = '👤 Người chơi 2';
             }
@@ -937,7 +914,9 @@ window.CoUp.Game = (function () {
     }
 
     function autoSave() {
-        Storage.saveGame(state);
+        if (state.gameMode !== 'online') {
+            Storage.saveGame(state);
+        }
     }
 
     function clonePiece(piece) {
@@ -964,10 +943,117 @@ window.CoUp.Game = (function () {
             diffGroup.style.display = state.gameMode === 'pve' ? 'flex' : 'none';
         }
 
+        var roomBadge = document.getElementById('online-room-badge');
+        if (roomBadge) {
+            roomBadge.style.display = (state.gameMode === 'online' && Multiplayer.getRoomCode()) ? 'flex' : 'none';
+        }
+
+        var undoBtn = document.getElementById('btn-undo');
+        if (undoBtn) {
+            undoBtn.style.display = state.gameMode === 'online' ? 'none' : 'inline-block';
+        }
+
         var diffBtns = document.querySelectorAll('.diff-btn');
         diffBtns.forEach(function (b) {
             b.classList.toggle('active', b.dataset.diff === state.aiDifficulty);
         });
+    }
+
+    // =============================================
+    //  MULTIPLAYER EVENTS DISPATCHER
+    // =============================================
+
+    function handleMultiplayerEvent(type, payload) {
+        switch (type) {
+            case 'url_room_detected':
+                // Auto open room modal and fill join code
+                var modal = document.getElementById('modal-online-room');
+                if (modal) modal.classList.add('active');
+                switchRoomTab('join');
+                var inp = document.getElementById('input-join-code');
+                if (inp) inp.value = payload.roomCode;
+                break;
+
+            case 'room_created':
+                var readyBox = document.getElementById('host-ready-box');
+                var loadingBox = document.getElementById('host-loading-box');
+                var initBox = document.getElementById('host-init-box');
+                var codeText = document.getElementById('display-room-code');
+                var linkInp = document.getElementById('display-share-link');
+                var roomBadgeCode = document.getElementById('current-room-code');
+
+                if (loadingBox) loadingBox.style.display = 'none';
+                if (initBox) initBox.style.display = 'none';
+                if (readyBox) readyBox.style.display = 'block';
+                if (codeText) codeText.textContent = payload.roomCode;
+                if (roomBadgeCode) roomBadgeCode.textContent = payload.roomCode;
+                if (linkInp) linkInp.value = Multiplayer.getShareableUrl(payload.roomCode);
+
+                state.gameMode = 'online';
+                state.myOnlineColor = 'red'; // Host is Red
+                syncControlsUI();
+                break;
+
+            case 'connected':
+                var roomModal = document.getElementById('modal-online-room');
+                if (roomModal) roomModal.classList.remove('active');
+                
+                Sound.playGameStart();
+                showToast('🎉 Đã kết nối với đối thủ! Trận đấu bắt đầu.');
+
+                state.gameMode = 'online';
+                state.myOnlineColor = payload.isHost ? 'red' : 'black';
+
+                if (payload.isHost) {
+                    // Host sends board setup to Guest
+                    Multiplayer.send('sync_board', { board: state.board });
+                }
+
+                syncControlsUI();
+                updatePlayerCards();
+                updateTurnDisplay();
+                break;
+
+            case 'sync_board':
+                // Guest receives board setup from Host
+                if (payload && payload.board) {
+                    state.board = payload.board;
+                    render();
+                }
+                break;
+
+            case 'move':
+                // Remote move received from peer
+                executeMove(payload.fromRow, payload.fromCol, payload.toRow, payload.toCol, payload.moveType, false);
+                break;
+
+            case 'disconnected':
+                showToast('⚠️ ' + (payload.message || 'Đối thủ đã ngắt kết nối'), 4000);
+                break;
+
+            case 'error':
+                showToast('❌ ' + payload.message, 3000);
+                break;
+        }
+    }
+
+    function switchRoomTab(tab) {
+        var tabCreate = document.getElementById('tab-create-room');
+        var tabJoin = document.getElementById('tab-join-room');
+        var panelCreate = document.getElementById('panel-create-room');
+        var panelJoin = document.getElementById('panel-join-room');
+
+        if (tab === 'create') {
+            if (tabCreate) tabCreate.classList.add('active');
+            if (tabJoin) tabJoin.classList.remove('active');
+            if (panelCreate) panelCreate.classList.add('active');
+            if (panelJoin) panelJoin.classList.remove('active');
+        } else {
+            if (tabCreate) tabCreate.classList.remove('active');
+            if (tabJoin) tabJoin.classList.add('active');
+            if (panelCreate) panelCreate.classList.remove('active');
+            if (panelJoin) panelJoin.classList.add('active');
+        }
     }
 
     function setupControls() {
@@ -976,8 +1062,15 @@ window.CoUp.Game = (function () {
         modeBtns.forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var newMode = this.dataset.mode;
+                if (newMode === 'online') {
+                    var modal = document.getElementById('modal-online-room');
+                    if (modal) modal.classList.add('active');
+                    return;
+                }
+
                 if (state.gameMode === newMode) return;
                 state.gameMode = newMode;
+                Multiplayer.cleanup();
                 syncControlsUI();
                 updatePlayerCards();
                 updateTurnDisplay();
@@ -987,7 +1080,7 @@ window.CoUp.Game = (function () {
                     gameMode: state.gameMode,
                     aiDifficulty: state.aiDifficulty
                 });
-                showToast(newMode === 'pve' ? '🤖 Chế độ: Chơi với Máy' : '👥 Chế độ: 2 Người chơi');
+                showToast(newMode === 'pve' ? '🤖 Chế độ: Chơi với Máy' : '👥 Chế độ: Cùng máy');
                 autoSave();
 
                 if (state.gameMode === 'pve' && state.currentPlayer === 2) {
@@ -1015,6 +1108,104 @@ window.CoUp.Game = (function () {
                 autoSave();
             });
         });
+
+        // Online Room Tabs
+        var tabCreate = document.getElementById('tab-create-room');
+        if (tabCreate) tabCreate.addEventListener('click', function () { switchRoomTab('create'); });
+
+        var tabJoin = document.getElementById('tab-join-room');
+        if (tabJoin) tabJoin.addEventListener('click', function () { switchRoomTab('join'); });
+
+        // Start Create Room button
+        var btnStartCreate = document.getElementById('btn-start-create-room');
+        if (btnStartCreate) {
+            btnStartCreate.addEventListener('click', function () {
+                var initBox = document.getElementById('host-init-box');
+                var loadingBox = document.getElementById('host-loading-box');
+                if (initBox) initBox.style.display = 'none';
+                if (loadingBox) loadingBox.style.display = 'block';
+
+                Multiplayer.createRoom(function (success, res) {
+                    if (!success) {
+                        showToast('❌ ' + res);
+                        if (initBox) initBox.style.display = 'block';
+                        if (loadingBox) loadingBox.style.display = 'none';
+                    }
+                });
+            });
+        }
+
+        // Start Join Room button
+        var btnStartJoin = document.getElementById('btn-start-join-room');
+        if (btnStartJoin) {
+            btnStartJoin.addEventListener('click', function () {
+                var inp = document.getElementById('input-join-code');
+                var code = inp ? inp.value : '';
+                if (!code) {
+                    showToast('⚠️ Vui lòng nhập mã phòng 4 chữ số');
+                    return;
+                }
+
+                btnStartJoin.textContent = '⏳ Đang kết nối...';
+                btnStartJoin.disabled = true;
+
+                Multiplayer.joinRoom(code, function (success, err) {
+                    btnStartJoin.textContent = 'Tham Gia Ngay';
+                    btnStartJoin.disabled = false;
+                    if (!success) {
+                        showToast('❌ ' + err);
+                    }
+                });
+            });
+        }
+
+        // Copy Code button
+        var btnCopyCode = document.getElementById('btn-copy-code');
+        if (btnCopyCode) {
+            btnCopyCode.addEventListener('click', function () {
+                var code = Multiplayer.getRoomCode();
+                if (code && navigator.clipboard) {
+                    navigator.clipboard.writeText(code);
+                    showToast('📋 Đã sao chép mã phòng: ' + code);
+                }
+            });
+        }
+
+        // Copy Link button
+        var btnCopyLink = document.getElementById('btn-copy-link');
+        if (btnCopyLink) {
+            btnCopyLink.addEventListener('click', function () {
+                var code = Multiplayer.getRoomCode();
+                if (code && navigator.clipboard) {
+                    var url = Multiplayer.getShareableUrl(code);
+                    navigator.clipboard.writeText(url);
+                    showToast('🔗 Đã sao chép link mời bạn bè!');
+                }
+            });
+        }
+
+        // Room Info Button on Config Bar
+        var btnRoomInfo = document.getElementById('btn-room-info');
+        if (btnRoomInfo) {
+            btnRoomInfo.addEventListener('click', function () {
+                var modal = document.getElementById('modal-online-room');
+                if (modal) modal.classList.add('active');
+                switchRoomTab('create');
+            });
+        }
+
+        // Leave Room Button
+        var btnLeaveRoom = document.getElementById('btn-leave-room');
+        if (btnLeaveRoom) {
+            btnLeaveRoom.addEventListener('click', function () {
+                Multiplayer.cleanup();
+                state.gameMode = 'pve';
+                syncControlsUI();
+                updatePlayerCards();
+                updateTurnDisplay();
+                showToast('Đã rời phòng đấu online');
+            });
+        }
 
         // New game
         var btnNew = document.getElementById('btn-new-game');
@@ -1127,7 +1318,7 @@ window.CoUp.Game = (function () {
                 durationStr = m + ' phút ' + s + 's';
             }
 
-            var modeBadge = match.gameMode === 'pve' ? '🤖 vs Máy' : '👥 2 Người';
+            var modeBadge = match.gameMode === 'pve' ? '🤖 vs Máy' : (match.gameMode === 'online' ? '🌐 Đấu Online' : '👥 2 Người');
 
             div.innerHTML = ''
                 + '<div class="match-header">'
@@ -1148,6 +1339,7 @@ window.CoUp.Game = (function () {
     function init() {
         Board.init('board', handleCellClick);
         Effects.init();
+        Multiplayer.init(handleMultiplayerEvent);
 
         var settings = Storage.loadSettings();
         Sound.setEnabled(settings.soundEnabled);
@@ -1158,7 +1350,6 @@ window.CoUp.Game = (function () {
             btnSound.textContent = settings.soundEnabled ? '🔊' : '🔇';
         }
 
-        // Clean previous invalid saves
         Storage.clearGame();
         state = createNewState(settings.gameMode, settings.aiDifficulty);
 
