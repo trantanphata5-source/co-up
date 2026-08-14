@@ -1004,6 +1004,13 @@ window.CoUp.Game = (function () {
                 state.gameMode = 'online';
                 state.myOnlineColor = payload.isHost ? 'red' : 'black';
 
+                // Automatically orient the board so own pieces are at the bottom!
+                if (!payload.isHost) {
+                    Board.setFlipped(true); // Guest plays Black -> Black at bottom
+                } else {
+                    Board.setFlipped(false); // Host plays Red -> Red at bottom
+                }
+
                 if (payload.isHost) {
                     // Host sends board setup to Guest
                     Multiplayer.send('sync_board', { board: state.board });
@@ -1230,6 +1237,15 @@ window.CoUp.Game = (function () {
         // Undo
         var btnUndo = document.getElementById('btn-undo');
         if (btnUndo) btnUndo.addEventListener('click', undo);
+
+        // Flip Board View
+        var btnFlip = document.getElementById('btn-flip-board');
+        if (btnFlip) {
+            btnFlip.addEventListener('click', function () {
+                var flipped = Board.toggleFlipped();
+                showToast('🔄 Chiều bàn cờ: Quân ' + (flipped ? 'Đen' : 'Đỏ') + ' ở dưới');
+            });
+        }
 
         // Sound
         var btnSound = document.getElementById('btn-sound');

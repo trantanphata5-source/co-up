@@ -7,9 +7,9 @@
  * - Pure white / light paper background with crimson red (#b32424) grid lines
  * - Double outer frame (thick outer border, thin inner border)
  * - River band with "楚 河" (Sở Hà) and "漢 界" (Hán Giới)
- * - Dashed palace diagonals (X) for top (rows 0-2, cols 3-5) and bottom (rows 7-9, cols 3-5)
+ * - Dashed palace diagonals (X) for top and bottom palaces
  * - Traditional 4-corner tick marks (╬) at cannon and soldier positions
- * - Pieces sit directly on INTERSECTIONS, not inside cells
+ * - Supports automatic & manual Board Orientation Flipping (Xoay chiều bàn cờ Đỏ/Đen)
  */
 window.CoUp = window.CoUp || {};
 
@@ -22,7 +22,7 @@ window.CoUp.Board = (function () {
     var boardElement = null;
     var intersectionElements = []; // [row][col]
     var onCellClick = null;
-    var boardSvg = null;
+    var isFlipped = false; // false = Red at bottom (normal), true = Black at bottom (flipped)
 
     // Grid coordinate metrics (viewBox: 0 0 720 810)
     var VB_W = 720;
@@ -72,10 +72,12 @@ window.CoUp.Board = (function () {
         // Background
         svg.push('<rect width="' + VB_W + '" height="' + VB_H + '" fill="' + bg + '"/>');
 
+        // Wrapping group that supports 180deg rotation when flipped
+        var transform = isFlipped ? ' transform="rotate(180 360 405)"' : '';
+        svg.push('<g id="board-grid-group"' + transform + '>');
+
         // 1. Outer Double Frame
-        // Outer thick border
         svg.push('<rect x="12" y="12" width="' + (VB_W - 24) + '" height="' + (VB_H - 24) + '" fill="none" stroke="' + red + '" stroke-width="4.5"/>');
-        // Inner thin border
         svg.push('<rect x="22" y="22" width="' + (VB_W - 44) + '" height="' + (VB_H - 44) + '" fill="none" stroke="' + red + '" stroke-width="1.8"/>');
 
         // 2. Horizontal Lines (10 lines from col 0 to col 8)
@@ -85,20 +87,16 @@ window.CoUp.Board = (function () {
         }
 
         // 3. Vertical Lines
-        // Left & right borders cross the river completely
         svg.push('<line x1="' + getX(0) + '" y1="' + getY(0) + '" x2="' + getX(0) + '" y2="' + getY(9) + '" stroke="' + red + '" stroke-width="1.8"/>');
         svg.push('<line x1="' + getX(8) + '" y1="' + getY(0) + '" x2="' + getX(8) + '" y2="' + getY(9) + '" stroke="' + red + '" stroke-width="1.8"/>');
 
-        // Inner vertical lines DO NOT cross the river (row 0-4 and row 5-9)
         for (var c = 1; c < 8; c++) {
             var x = getX(c);
-            // Top half: row 0 to row 4
             svg.push('<line x1="' + x + '" y1="' + getY(0) + '" x2="' + x + '" y2="' + getY(4) + '" stroke="' + red + '" stroke-width="1.8"/>');
-            // Bottom half: row 5 to row 9
             svg.push('<line x1="' + x + '" y1="' + getY(5) + '" x2="' + x + '" y2="' + getY(9) + '" stroke="' + red + '" stroke-width="1.8"/>');
         }
 
-        // 4. Palace Diagonal Lines (X) - dashed
+        // 4. Palace Diagonal Lines (X)
         var dash = 'stroke-dasharray="7,5"';
         // Top palace: cols 3 to 5, rows 0 to 2
         svg.push('<line x1="' + getX(3) + '" y1="' + getY(0) + '" x2="' + getX(5) + '" y2="' + getY(2) + '" stroke="' + red + '" stroke-width="1.6" ' + dash + '/>');
@@ -115,13 +113,9 @@ window.CoUp.Board = (function () {
 
         // 6. Position Markers (Star tick marks ╬)
         var markPositions = [
-            // Top Cannons
             { r: 2, c: 1 }, { r: 2, c: 7 },
-            // Top Soldiers
             { r: 3, c: 0 }, { r: 3, c: 2 }, { r: 3, c: 4 }, { r: 3, c: 6 }, { r: 3, c: 8 },
-            // Bottom Soldiers
             { r: 6, c: 0 }, { r: 6, c: 2 }, { r: 6, c: 4 }, { r: 6, c: 6 }, { r: 6, c: 8 },
-            // Bottom Cannons
             { r: 7, c: 1 }, { r: 7, c: 7 }
         ];
 
@@ -129,33 +123,27 @@ window.CoUp.Board = (function () {
             svg.push(generateTickMarkSvg(pos.r, pos.c, red));
         });
 
+        svg.push('</g>');
         svg.push('</svg>');
         return svg.join('\n');
     }
 
-    /**
-     * Generate SVG path for a 4-bracket corner mark around an intersection
-     */
     function generateTickMarkSvg(row, col, color) {
         var cx = getX(col);
         var cy = getY(row);
-        var g = 6;  // gap from intersection center
-        var s = 10; // length of mark
+        var g = 6;
+        var s = 10;
         var paths = [];
 
-        // Top-left
         if (col > 0) {
             paths.push('M ' + (cx - g - s) + ' ' + (cy - g) + ' L ' + (cx - g) + ' ' + (cy - g) + ' L ' + (cx - g) + ' ' + (cy - g - s));
         }
-        // Top-right
         if (col < 8) {
             paths.push('M ' + (cx + g + s) + ' ' + (cy - g) + ' L ' + (cx + g) + ' ' + (cy - g) + ' L ' + (cx + g) + ' ' + (cy - g - s));
         }
-        // Bottom-left
         if (col > 0) {
             paths.push('M ' + (cx - g - s) + ' ' + (cy + g) + ' L ' + (cx - g) + ' ' + (cy + g) + ' L ' + (cx - g) + ' ' + (cy + g + s));
         }
-        // Bottom-right
         if (col < 8) {
             paths.push('M ' + (cx + g + s) + ' ' + (cy + g) + ' L ' + (cx + g) + ' ' + (cy + g) + ' L ' + (cx + g) + ' ' + (cy + g + s));
         }
@@ -165,14 +153,14 @@ window.CoUp.Board = (function () {
 
     /**
      * Create DOM structure for the board:
-     * - Background SVG (lines, river, frame, markers)
+     * - Background SVG
      * - 90 Intersection nodes placed precisely at (col, row)
      */
     function createBoard() {
         boardElement.innerHTML = '';
         intersectionElements = [];
 
-        // 1. Insert vector SVG board background
+        // 1. Vector SVG board background
         var svgContainer = document.createElement('div');
         svgContainer.className = 'board-svg-container';
         svgContainer.innerHTML = generateBoardSvg();
@@ -190,8 +178,9 @@ window.CoUp.Board = (function () {
                 node.className = 'intersection-node';
                 node.dataset.row = r;
                 node.dataset.col = c;
-                node.style.left = getPercentX(c) + '%';
-                node.style.top = getPercentY(r) + '%';
+
+                // Position node based on orientation
+                updateNodePosition(node, r, c);
 
                 // Piece container
                 var pieceEl = document.createElement('div');
@@ -236,6 +225,44 @@ window.CoUp.Board = (function () {
         }
     }
 
+    function updateNodePosition(node, r, c) {
+        var displayCol = isFlipped ? (8 - c) : c;
+        var displayRow = isFlipped ? (9 - r) : r;
+        node.style.left = getPercentX(displayCol) + '%';
+        node.style.top = getPercentY(displayRow) + '%';
+    }
+
+    /**
+     * Set or toggle board orientation perspective (Red/Black at bottom)
+     */
+    function setFlipped(flipped) {
+        isFlipped = !!flipped;
+        
+        // Update SVG background transform
+        var gridGroup = document.getElementById('board-grid-group');
+        if (gridGroup) {
+            if (isFlipped) {
+                gridGroup.setAttribute('transform', 'rotate(180 360 405)');
+            } else {
+                gridGroup.removeAttribute('transform');
+            }
+        }
+
+        // Reposition all 90 nodes
+        for (var r = 0; r < ROWS; r++) {
+            for (var c = 0; c < COLS; c++) {
+                if (intersectionElements[r] && intersectionElements[r][c]) {
+                    updateNodePosition(intersectionElements[r][c], r, c);
+                }
+            }
+        }
+    }
+
+    function toggleFlipped() {
+        setFlipped(!isFlipped);
+        return isFlipped;
+    }
+
     /**
      * Render the whole board state
      */
@@ -247,9 +274,6 @@ window.CoUp.Board = (function () {
         }
     }
 
-    /**
-     * Update a single intersection appearance
-     */
     function updateIntersection(row, col, piece, selectedCell, validMoves) {
         var node = intersectionElements[row][col];
         var pieceEl = node.querySelector('.piece');
@@ -295,14 +319,12 @@ window.CoUp.Board = (function () {
 
         if (piece.faceUp) {
             if (prevState === 'down') {
-                // Flip animation
                 pieceEl.className = 'piece ' + piece.color + ' flip-anim';
-                pieceEl.offsetHeight; // force reflow
+                pieceEl.offsetHeight;
                 setTimeout(function () {
                     pieceEl.className = 'piece ' + piece.color + ' face-up';
                 }, 650);
             } else if (prevState === 'empty') {
-                // Arrive animation
                 pieceEl.className = 'piece ' + piece.color + ' face-up arrive-anim';
                 setTimeout(function () {
                     pieceEl.classList.remove('arrive-anim');
@@ -331,6 +353,9 @@ window.CoUp.Board = (function () {
         renderBoard: renderBoard,
         getCellElement: getCellElement,
         getPieceElement: getPieceElement,
+        setFlipped: setFlipped,
+        toggleFlipped: toggleFlipped,
+        isFlipped: function () { return isFlipped; },
         ROWS: ROWS,
         COLS: COLS
     };
