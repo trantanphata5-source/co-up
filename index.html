@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cờ Úp — Cờ Tướng Kiểu Úp</title>
+    <meta name="description" content="Game Cờ Úp online - Cờ tướng kiểu úp với hiệu ứng đẹp mắt, âm thanh sống động, chế độ chơi với máy 3 cấp độ">
+    <meta name="theme-color" content="#140f0b">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♚</text></svg>">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app">
+
+    <!-- ===== HEADER ===== -->
+    <header class="header">
+        <div class="header-left">
+            <h1 class="logo">♚ Cờ Úp</h1>
+            <span class="subtitle">Cờ Tướng Kiểu Úp</span>
+        </div>
+        <div class="header-right">
+            <button id="btn-sound" class="icon-btn" title="Bật/Tắt âm thanh">🔊</button>
+            <button id="btn-help" class="icon-btn" title="Hướng dẫn chơi">❓</button>
+            <button id="btn-history" class="icon-btn" title="Lịch sử đấu">📊</button>
+        </div>
+    </header>
+
+    <!-- ===== GAME CONFIG BAR (Mode & Difficulty) ===== -->
+    <div class="game-config-bar">
+        <div class="mode-select-group">
+            <button id="mode-pve" class="mode-btn active" data-mode="pve">🤖 Chơi với Máy</button>
+            <button id="mode-pvp" class="mode-btn" data-mode="pvp">👥 2 Người chơi</button>
+        </div>
+
+        <div id="ai-difficulty-group" class="difficulty-select-group">
+            <span class="diff-label">Độ khó:</span>
+            <button class="diff-btn" data-diff="easy">🟢 Dễ</button>
+            <button class="diff-btn active" data-diff="medium">🟡 Vừa</button>
+            <button class="diff-btn" data-diff="hard">🔴 Khó</button>
+        </div>
+    </div>
+
+    <!-- ===== TURN INFO ===== -->
+    <div id="current-turn" class="turn-info">
+        Người chơi 1 — Lật quân để bắt đầu!
+    </div>
+
+    <!-- ===== MAIN 3-COLUMN LAYOUT ===== -->
+    <main class="main-layout">
+
+        <!-- ─── Player 1 Panel ─── -->
+        <aside class="player-panel panel-left">
+            <div id="player1-card" class="player-card active">
+                <div class="player-name">👤 Người chơi 1</div>
+                <div id="p1-color" class="player-color">❓ Chưa xác định</div>
+                <div class="player-timer">⏱ <span id="timer-p1">00:00</span></div>
+            </div>
+            <div class="captured-section">
+                <h3>Quân Đỏ bị ăn</h3>
+                <div id="captured-red" class="captured-list">
+                    <span class="no-captured">—</span>
+                </div>
+            </div>
+            <div class="captured-section">
+                <h3>Quân Đen bị ăn</h3>
+                <div id="captured-black" class="captured-list">
+                    <span class="no-captured">—</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ─── Board ─── -->
+        <div class="board-wrapper">
+            <div id="board-container" class="board-container">
+                <div id="board" class="board"></div>
+                <canvas id="effects-canvas" class="effects-canvas"></canvas>
+            </div>
+
+            <!-- Controls -->
+            <div class="controls">
+                <button id="btn-new-game" class="ctrl-btn">🎲 Ván Mới</button>
+                <button id="btn-undo" class="ctrl-btn">↩️ Hoàn Tác</button>
+                <div class="move-counter">Nước đi: <span id="move-count">0</span></div>
+            </div>
+        </div>
+
+        <!-- ─── Player 2 / AI Panel ─── -->
+        <aside class="player-panel panel-right">
+            <div id="player2-card" class="player-card">
+                <div id="player2-title" class="player-name">🤖 Máy (Vừa)</div>
+                <div id="p2-color" class="player-color">❓ Chưa xác định</div>
+                <div class="player-timer">⏱ <span id="timer-p2">00:00</span></div>
+            </div>
+            <div class="move-history-section">
+                <h3>Lịch sử nước đi</h3>
+                <div id="move-list" class="move-list">
+                    <div class="no-moves">Chưa có nước đi nào</div>
+                </div>
+            </div>
+        </aside>
+
+    </main>
+
+</div>
+
+<!-- ===============================================
+     MODALS
+     =============================================== -->
+
+<!-- ─── Help Modal ─── -->
+<div id="modal-help" class="modal-overlay">
+    <div class="modal">
+        <button class="modal-close">✕</button>
+        <h2>📖 Hướng Dẫn & Luật Chơi Cờ Úp</h2>
+        <div class="help-content">
+            <h3>🎯 Mục tiêu</h3>
+            <p>Chiếu bí hoặc bắt được <strong>Tướng</strong> của đối phương để giành chiến thắng.</p>
+
+            <h3>🎮 Bố trí ban đầu</h3>
+            <ul>
+                <li>2 quân <strong>Tướng</strong> (帥 và 將) được đặt <strong>ngửa</strong> ngay từ đầu tại cung Tướng của mỗi bên. Bên Đỏ đi trước.</li>
+                <li>15 quân còn lại của mỗi bên được <strong>xáo trộn ngẫu nhiên và úp mặt xuống</strong> tại 15 vị trí xuất phát truyền thống của Cờ Tướng.</li>
+            </ul>
+
+            <h3>🔄 Nước đi đầu tiên của Quân Úp</h3>
+            <p>Khi quân cờ còn đang <strong>úp</strong>, nó phải di chuyển theo đúng <strong>luật của vị trí mà nó đang chiếm giữ</strong>:</p>
+            <ul>
+                <li>Vị trí <strong>Xe</strong>: Đi thẳng/ngang không giới hạn ô.</li>
+                <li>Vị trí <strong>Mã</strong>: Đi chữ L (có tính luật cản chân mã).</li>
+                <li>Vị trí <strong>Tượng</strong>: Đi chéo 2 ô (có tính luật cản mắt tượng).</li>
+                <li>Vị trí <strong>Sĩ</strong>: Đi chéo 1 ô.</li>
+                <li>Vị trí <strong>Pháo</strong>: Đi thẳng/ngang; ăn quân bằng cách nhảy qua 1 quân làm ngòi.</li>
+                <li>Vị trí <strong>Tốt</strong>: Đi thẳng 1 ô về phía trước.</li>
+            </ul>
+            <p>✨ <strong>Ngay khi quân úp di chuyển đến ô đích</strong>, nó sẽ được <strong>lật ngửa</strong> để lộ diện danh tính thật sự!</p>
+
+            <h3>⚡ Nước đi sau khi đã Mở (Lộ diện)</h3>
+            <p>Từ nước thứ hai trở đi, quân cờ di chuyển theo đúng luật chuẩn của quân cờ đó, kèm <strong>2 ngoại lệ đặc sắc của Cờ Úp</strong>:</p>
+            <ul>
+                <li>🏰 <strong>Quân Sĩ:</strong> Không bị giới hạn trong cung, có thể <strong>đi chéo 1 ô khắp bàn cờ</strong>!</li>
+                <li>🌊 <strong>Quân Tượng:</strong> Có thể <strong>bay qua sông</strong> để tấn công lãnh thổ đối phương!</li>
+                <li>👑 <strong>Luật Lộ mặt tướng:</strong> Hai Tướng không được nhìn mặt nhau trên cùng một cột trống.</li>
+            </ul>
+
+            <h3>🤖 Chế độ chơi với Máy</h3>
+            <ul>
+                <li>🟢 <strong>Dễ:</strong> Đi cờ ngẫu nhiên, giải trí nhẹ nhàng.</li>
+                <li>🟡 <strong>Vừa:</strong> Đánh giá thiệt hơn, ăn quân có lợi và tránh vị trí nguy hiểm.</li>
+                <li>🔴 <strong>Khó:</strong> Thuật toán Minimax + Alpha-Beta, tính toán bảo vệ Tướng và mở quân chiến thuật.</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- ─── Confirm New Game ─── -->
+<div id="modal-confirm" class="modal-overlay">
+    <div class="modal modal-small">
+        <h2>🎲 Ván Mới?</h2>
+        <p>Bạn có chắc muốn bắt đầu ván mới?<br>Ván đang chơi sẽ được làm mới.</p>
+        <div class="modal-buttons">
+            <button id="btn-confirm-new" class="btn btn-primary">Đồng ý</button>
+            <button id="btn-cancel-new" class="btn btn-secondary">Hủy</button>
+        </div>
+    </div>
+</div>
+
+<!-- ─── Winner Modal ─── -->
+<div id="modal-winner" class="modal-overlay">
+    <div class="modal modal-small modal-winner">
+        <h2 id="winner-text">🎉 Chiến thắng! 🎉</h2>
+        <div class="modal-buttons">
+            <button id="btn-play-again" class="btn btn-primary">🎲 Chơi Lại</button>
+        </div>
+    </div>
+</div>
+
+<!-- ─── Match History Modal ─── -->
+<div id="modal-match-history" class="modal-overlay">
+    <div class="modal">
+        <button class="modal-close">✕</button>
+        <h2>📊 Lịch Sử Các Ván Đấu</h2>
+        <div id="match-history-list" class="match-history-list">
+            <p class="no-history">Chưa có ván đấu nào được ghi lại.</p>
+        </div>
+        <div class="modal-buttons" style="margin-top:16px">
+            <button id="btn-clear-history" class="btn btn-secondary">🗑 Xóa lịch sử</button>
+        </div>
+    </div>
+</div>
+
+<!-- ─── Toast Notification ─── -->
+<div id="toast"></div>
+
+<!-- ===============================================
+     SCRIPTS (load order matters)
+     =============================================== -->
+<script src="js/pieces.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/sound.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/board.js"></script>
+<script src="js/game.js"></script>
+
+</body>
+</html>
